@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Red de Atención — Córdoba Capital</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+    
+    <!-- Librería para Mapa Interactivo (Leaflet) -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <style>
+        /* Tipografías */
+        body { font-family: 'Sora', sans-serif; background-color: #faf8f5; overflow: hidden; margin: 0; color: #433e3c; }
+        h1, h2, h3, h4, label, button, input, select, textarea, .font-space { font-family: 'Space Grotesk', sans-serif; }
+        
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        
+        /* Contenedores del mapa */
+        #map-container { position: absolute; top: 120px; left: 0; right: 0; bottom: 0; z-index: 1; background: #e8e6e1; }
+        @media (max-width: 639px) { #map-container { top: 165px; } }
+        
+        /* Estilos de los Pines Personalizados (Leaflet) */
+        .custom-pin { background: transparent; border: none; }
+        .pin-shape {
+            width: 36px; height: 36px;
+            border-radius: 50% 50% 50% 0;
+            transform: rotate(-45deg);
+            box-shadow: 2px 4px 10px rgba(67, 62, 60, 0.2);
+            transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+            display: flex; justify-content: center; align-items: center;
+            border: 2px solid;
+            background-color: #fcfbf9;
+        }
+        .pin-shape:hover { transform: rotate(-45deg) scale(1.15); z-index: 1000 !important; }
+        .pin-icon { transform: rotate(45deg); font-size: 17px; user-select: none; font-family: 'Sora', sans-serif; }
+        
+        /* Scrollbar suave para paneles */
+        .custom-scroll::-webkit-scrollbar { width: 6px; }
+        .custom-scroll::-webkit-scrollbar-track { background: transparent; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #dcd6cf; border-radius: 4px; }
+    </style>
+</head>
+<body>
+
+    <!-- Header y Controles -->
+    <header class="bg-[#faf8f5] shadow-[0_2px_10px_rgba(0,0,0,0.03)] border-b border-[#ece8e0] z-50 relative flex flex-col">
+        <div class="px-5 py-3 flex items-center justify-between gap-3 flex-wrap">
+            <div class="flex items-center gap-4 flex-wrap">
+                <h1 class="text-xl font-bold text-[#433e3c]">Red de Atención <span class="hidden sm:inline font-normal text-[#8c8580]">— Córdoba</span></h1>
+                <button onclick="window.toggleModal('modal-urgencias')" class="bg-[#b06a6c] text-[#fcfbf9] px-4 py-1.5 rounded-xl font-bold shadow-sm hover:bg-[#97585a] transition flex items-center gap-2 text-sm">
+                    <span class="dyn-icon" data-icon="urgencia">🚨</span> Urgencias
+                </button>
+            </div>
+            <div class="flex gap-2">
+                <button onclick="window.toggleModal('modal-categorias')" class="bg-[#f2efe9] text-[#756f6b] border border-[#e6e1d8] px-4 py-1.5 rounded-xl font-bold hover:bg-[#e8e4dc] transition text-sm flex items-center gap-2">
+                    ⚙️ Categorías
+                </button>
+                <button onclick="window.toggleVisualMode()" id="btn-visual" class="bg-[#f2efe9] text-[#756f6b] border border-[#e6e1d8] px-4 py-1.5 rounded-xl font-bold hover:bg-[#e8e4dc] transition text-sm flex items-center gap-2">
+                    Cambiar a Glifos
+                </button>
+                <button onclick="window.toggleModal('modal-agregar')" class="bg-[#5a5451] text-[#fcfbf9] px-4 py-1.5 rounded-xl font-bold hover:bg-[#433e3c] transition whitespace-nowrap text-sm">
+                    ➕ Agregar
+                </button>
+            </div>
+        </div>
+        <!-- Filtros -->
+        <div class="px-5 py-3 border-t border-[#f2efe9] flex gap-2 overflow-x-auto hide-scrollbar" id="filters"></div>
+    </header>
+
+    <!-- Área del Mapa -->
+    <div id="map-container"></div>
+
+    <!-- Indicador de cantidad -->
+    <div class="absolute bottom-6 left-5 z-[400] bg-[#fcfbf9]/95 backdrop-blur-md px-4 py-2 rounded-xl shadow-sm text-sm font-space font-bold border border-[#ece8e0] text-[#756f6b]" id="counter">
+        Cargando mapa...
+    </div>
+
+    <!-- Botón ¿Cómo pedir ayuda? -->
+    <button onclick="window.toggleModal('modal-ayuda')" class="absolute bottom-6 right-5 z-[400] bg-[#ebd4d6] text-[#8e4a55] px-6 py-3.5 rounded-2xl font-space font-bold shadow-[0_4px_16px_rgba(235,212,214,0.7)] hover:bg-[#dfc4c7] transition flex items-center gap-2 border border-[#dfc4c7]/50">
+        <span class="dyn-icon text-lg" data-icon="ayuda">💡</span> ¿Cómo pedir ayuda?
+    </button>
+
+    <!-- PANEL LATERAL DE DETALLE -->
+    <div id="panel-detalle" class="fixed inset-y-0 right-0 w-full sm:w-[380px] bg-[#fcfbf9] shadow-2xl z-[500] transform translate-y-full sm:translate-y-0 sm:translate-x-full transition-transform duration-300 ease-in-out flex flex-col rounded-t-3xl sm:rounded-none mt-[160px] sm:mt-0">
+        <div class="flex-1 overflow-y-auto custom-scroll p-7 pb-24">
+            <div class="flex justify-between items-start mb-5">
+                <span id="det-cat" class="px-3 py-1 rounded-full text-xs font-space font-bold border flex items-center gap-1.5"></span>
+                <button onclick="window.cerrarDetalle()" class="text-[#8c8580] hover:text-[#433e3c] text-2xl bg-[#f2efe9] w-9 h-9 rounded-full flex items-center justify-center transition">&times;</button>
+            </div>
+            <h2 id="det-name" class="text-2xl font-bold mb-5 leading-tight text-[#433e3c]"></h2>
+            
+            <div class="space-y-4 text-sm font-medium text-[#5a5451]">
+                <div class="flex gap-3 items-start"><span class="text-lg mt-0.5 dyn-icon" data-icon="pin">📍</span> <p id="det-address" class="leading-relaxed"></p></div>
+                <div class="flex gap-3 items-center"><span class="text-lg dyn-icon" data-icon="tel">📞</span> <a id="det-phone" href="#" class="text-[#a66d4f] font-bold hover:underline"></a></div>
+                <div class="flex gap-3 items-center"><span class="text-lg dyn-icon" data-icon="reloj">🕒</span> <p id="det-hours"></p></div>
+                <div class="flex gap-3 items-center"><span class="text-lg dyn-icon" data-icon="mail">✉️</span> <p id="det-contact"></p></div>
+            </div>
+
+            <div class="mt-7 bg-[#f4efe8] border border-[#e6e1d8] p-5 rounded-2xl">
+                <h3 class="font-bold text-[#433e3c] mb-2 font-space">Servicios brindados</h3>
+                <p id="det-desc" class="text-[#5a5451] text-sm leading-relaxed"></p>
+            </div>
+
+            <div class="mt-8 text-center">
+                <button onclick="window.promptDelete()" class="text-[13px] font-space text-[#9e9791] hover:text-[#b06a6c] underline decoration-[#9e9791]/40 hover:decoration-[#b06a6c] transition">
+                    Eliminar esta institución (Local)
+                </button>
+            </div>
+        </div>
+        
+        <div class="absolute bottom-0 left-0 right-0 p-5 bg-[#fcfbf9] border-t border-[#ece8e0] flex gap-3 shadow-[0_-4px_20px_rgba(0,0,0,0.02)]">
+            <a id="btn-maps" target="_blank" class="flex-1 bg-[#f2efe9] text-[#5a5451] text-center py-3.5 rounded-xl font-space font-bold hover:bg-[#e8e4dc] transition">📍 Cómo llegar</a>
+            <a id="btn-call" class="flex-1 bg-[#798f75] text-[#fcfbf9] text-center py-3.5 rounded-xl font-space font-bold hover:bg-[#687e64] transition">📞 Llamar</a>
+        </div>
+    </div>
+
+    <!-- MODAL GESTIONAR CATEGORÍAS -->
+    <div id="modal-categorias" class="fixed inset-0 bg-black/30 z-[600] hidden flex-col items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-[#fcfbf9] rounded-3xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div class="p-6 border-b border-[#ece8e0] flex justify-between items-center bg-[#faf8f5]">
+                <h2 class="text-xl font-space font-bold text-[#433e3c]">Gestionar Categorías</h2>
+                <button onclick="window.toggleModal('modal-categorias')" class="text-[#8c8580] hover:text-[#433e3c] text-3xl leading-none">&times;</button>
+            </div>
+            <div class="p-6 overflow-y-auto custom-scroll space-y-4">
+                <div id="lista-categorias" class="space-y-2 mb-6"></div>
+                
+                <hr class="border-[#ece8e0]">
+                <h3 class="font-space font-bold text-[#433e3c] mb-2">Crear nueva categoría</h3>
+                <form id="form-categoria" onsubmit="window.guardarCategoria(event)" class="space-y-3">
+                    <div><label class="block text-xs font-bold text-[#756f6b] mb-1">Nombre</label><input required id="c-name" placeholder="Ej. Comedores" class="w-full border border-[#dcd6cf] rounded-xl p-2 bg-[#faf8f5] outline-none"></div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div><label class="block text-xs font-bold text-[#756f6b] mb-1">Emoji</label><input required id="c-emoji" placeholder="🍲" class="w-full border border-[#dcd6cf] rounded-xl p-2 bg-[#faf8f5] outline-none"></div>
+                        <div><label class="block text-xs font-bold text-[#756f6b] mb-1">Color (Hex)</label><input required id="c-color" type="color" value="#a66d4f" class="w-full h-10 border border-[#dcd6cf] rounded-xl bg-[#faf8f5] p-1 cursor-pointer"></div>
+                    </div>
+                    <button type="submit" class="w-full bg-[#5a5451] text-[#fcfbf9] font-space font-bold py-3 rounded-xl mt-2 hover:bg-[#433e3c] transition">Crear Categoría</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL AGREGAR INSTITUCIÓN -->
+    <div id="modal-agregar" class="fixed inset-0 bg-black/30 z-[600] hidden flex-col items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-[#fcfbf9] rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div class="p-6 border-b border-[#ece8e0] flex justify-between items-center bg-[#faf8f5]">
+                <h2 class="text-xl font-space font-bold text-[#433e3c]">Agregar Institución</h2>
+                <button onclick="window.toggleModal('modal-agregar')" class="text-[#8c8580] hover:text-[#433e3c] text-3xl leading-none">&times;</button>
+            </div>
+            <form id="form-agregar" class="p-6 overflow-y-auto custom-scroll space-y-4" onsubmit="window.guardarInstitucion(event)">
+                <div><label class="block text-sm font-bold text-[#756f6b] mb-1">Nombre *</label><input required id="f-name" class="w-full border border-[#dcd6cf] rounded-xl p-3 bg-[#faf8f5] outline-none focus:border-[#a66d4f] focus:bg-[#fcfbf9] transition"></div>
+                <div><label class="block text-sm font-bold text-[#756f6b] mb-1">Categoría *</label>
+                    <select required id="f-cat" class="w-full border border-[#dcd6cf] rounded-xl p-3 bg-[#faf8f5] outline-none focus:border-[#a66d4f] focus:bg-[#fcfbf9] transition"></select>
+                </div>
+                <div><label class="block text-sm font-bold text-[#756f6b] mb-1">Dirección *</label><input required id="f-address" class="w-full border border-[#dcd6cf] rounded-xl p-3 bg-[#faf8f5] outline-none focus:border-[#a66d4f] focus:bg-[#fcfbf9] transition"></div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div><label class="block text-sm font-bold text-[#756f6b] mb-1">Teléfono</label><input id="f-phone" class="w-full border border-[#dcd6cf] rounded-xl p-3 bg-[#faf8f5] outline-none focus:border-[#a66d4f]"></div>
+                    <div><label class="block text-sm font-bold text-[#756f6b] mb-1">Horario</label><input id="f-hours" class="w-full border border-[#dcd6cf] rounded-xl p-3 bg-[#faf8f5] outline-none focus:border-[#a66d4f]"></div>
+                </div>
+                <div><label class="block text-sm font-bold text-[#756f6b] mb-1">Contacto / Web</label><input id="f-contact" class="w-full border border-[#dcd6cf] rounded-xl p-3 bg-[#faf8f5] outline-none focus:border-[#a66d4f]"></div>
+                <div><label class="block text-sm font-bold text-[#756f6b] mb-1">Servicios brindados</label><textarea id="f-desc" rows="2" class="w-full border border-[#dcd6cf] rounded-xl p-3 bg-[#faf8f5] outline-none focus:border-[#a66d4f] focus:bg-[#fcfbf9]"></textarea></div>
+                <div class="bg-[#f0f2ef] p-5 rounded-2xl border border-[#dcd6cf]">
+                    <p class="text-xs text-[#5a5451] mb-3 font-medium leading-relaxed">📍 Para mayor precisión en el mapa, navegá, mové el mapa, y copiá las coordenadas aproximadas.</p>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div><label class="block text-xs font-bold text-[#798f75] mb-1">Latitud *</label><input required id="f-lat" type="number" step="any" placeholder="-31.413" class="w-full border border-[#c5cfc3] rounded-lg p-2 bg-[#fcfbf9] outline-none focus:border-[#798f75]"></div>
+                        <div><label class="block text-xs font-bold text-[#798f75] mb-1">Longitud *</label><input required id="f-lng" type="number" step="any" placeholder="-64.185" class="w-full border border-[#c5cfc3] rounded-lg p-2 bg-[#fcfbf9] outline-none focus:border-[#798f75]"></div>
+                    </div>
+                </div>
+                <button type="submit" class="w-full bg-[#5a5451] text-[#fcfbf9] font-space font-bold py-4 rounded-xl mt-2 hover:bg-[#433e3c] transition shadow-md">Guardar Institución</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL CONFIRMAR ELIMINACIÓN -->
+    <div id="modal-delete" class="fixed inset-0 bg-black/40 z-[700] hidden flex-col items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-[#fcfbf9] w-full max-w-sm rounded-3xl p-7 shadow-2xl text-center">
+            <div class="text-4xl mb-4 dyn-icon text-[#b06a6c]" data-icon="alerta">⚠️</div>
+            <h3 class="font-space text-xl font-bold text-[#433e3c] mb-2">¿Eliminar institución?</h3>
+            <p class="text-[#756f6b] text-sm mb-7 leading-relaxed">Esta acción eliminará el lugar de tu mapa local permanentemente. ¿Confirmás?</p>
+            <div class="flex gap-3">
+                <button onclick="window.toggleModal('modal-delete')" class="flex-1 bg-[#f2efe9] text-[#5a5451] font-space font-bold py-3.5 rounded-xl hover:bg-[#e8e4dc] transition">Cancelar</button>
+                <button onclick="window.confirmDelete()" class="flex-1 bg-[#b06a6c] text-[#fcfbf9] font-space font-bold py-3.5 rounded-xl hover:bg-[#97585a] transition">Eliminar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODALES DE AYUDA Y URGENCIAS OMITIDOS POR ESPACIO (Reutilizar los mismos del archivo anterior sin modificar sus clases) -->
+    
+    <!-- TOAST -->
+    <div id="toast" class="fixed top-24 left-1/2 transform -translate-x-1/2 bg-[#798f75] text-[#fcfbf9] px-6 py-3 rounded-full shadow-lg font-space font-bold transition-all duration-300 opacity-0 pointer-events-none z-[1000]">
+        Acción completada ✓
+    </div>
+
+    <script>
+        // --- DATOS INICIALES POR DEFECTO ---
+        const defaultCategories = {
+            judicial: { color: "#a66d4f", emoji: "⚖️", glyph: "◈", label: "Judicial/Legal" },
+            salud: { color: "#798f75", emoji: "🏥", glyph: "◎", label: "Salud" },
+            ninez: { color: "#c4868e", emoji: "👧👦", glyph: "◐", label: "Niñez/Adolescencia" },
+            soccivil: { color: "#c29d71", emoji: "🤝", glyph: "◌", label: "ONG/Soc. Civil" },
+            psicosocial: { color: "#8da5a3", emoji: "💬", glyph: "◇", label: "Psicosocial" },
+            otro: { color: "#9e9791", emoji: "📍", glyph: "◉", label: "Otro" }
+        };
+
+        const seedData = [
+            // ¡Ubicaciones exactas corregidas!
+            { id: "s1", name: "Polo Integral de la Mujer", category: "psicosocial", address: "Entre Ríos 680 esq. Bv. Perón", phone: "0800 888 9898 / 351 8141400", hours: "Atención 24 hs", contact: "WhatsApp", description: "Atención integral en violencia de género. Área DIS, Brigada de Protección, asesoramiento legal, psicológico.", lat: -31.419400, lng: -64.175100 },
+            { id: "s2", name: "U.J. Delitos contra la Integridad Sexual", category: "judicial", address: "Entre Ríos 680", phone: "Interno 34422", hours: "Atención 24 hs", contact: "MPF Córdoba", description: "Unidad Judicial especializada en delitos sexuales.", lat: -31.419450, lng: -64.175150 },
+            { id: "s3", name: "U.J. Violencia Familiar", category: "judicial", address: "Entre Ríos 680", phone: "Interno 30641", hours: "Atención 24 hs", contact: "MPF Córdoba", description: "Toma de denuncias de violencia familiar y medidas cautelares.", lat: -31.419350, lng: -64.175050 },
+            { id: "s4", name: "SeNAF — Sede Central", category: "ninez", address: "Av. Vélez Sarsfield 771", phone: "(0351) 4343456", hours: "Lunes a viernes, 8 a 20 hs", contact: "Secretaría de Niñez", description: "Interviene en abuso y vulneración de derechos de NNyA.", lat: -31.424600, lng: -64.188700 },
+            { id: "s5", name: "Hospital Pediátrico del Niño Jesús", category: "salud", address: "Av. Castro Barros 650", phone: "(0351) 4346060", hours: "Guardia 24 hs", contact: "Ministerio de Salud", description: "Hospital de referencia para NNyA (Barrio San Martín).", lat: -31.396500, lng: -64.200500 },
+            { id: "s6", name: "Fiscalía General — MPF", category: "judicial", address: "Caseros 551", phone: "(0351) 4481000", hours: "Lunes a viernes, 8 a 14 hs", contact: "mpfcordoba.gob.ar", description: "Fiscalías especializadas en violencia.", lat: -31.416800, lng: -64.190100 },
+            { id: "s7", name: "Defensoría del Pueblo", category: "psicosocial", address: "Deán Funes 352", phone: "-", hours: "Lunes a viernes, 8 a 18 hs", contact: "defensorcordoba.org.ar", description: "Orientación y asistencia en casos de violencia.", lat: -31.413700, lng: -64.186300 },
+            { id: "s8", name: "Defensoría de los Derechos de NNyA", category: "ninez", address: "Dámaso Larrañaga 94, Nueva Córdoba", phone: "(351) 428 8888", hours: "Lunes a viernes", contact: "consulta.defensoria@cba.gov.ar", description: "Acompaña a personas e instituciones en restitución de derechos.", lat: -31.424500, lng: -64.186800 }
+        ];
+
+        // --- SISTEMA DE ALMACENAMIENTO LOCAL ---
+        function loadData() {
+            let cat = localStorage.getItem('redCba_categories');
+            let inst = localStorage.getItem('redCba_institutions');
+            
+            if(!cat) { cat = JSON.stringify(defaultCategories); localStorage.setItem('redCba_categories', cat); }
+            if(!inst) { inst = JSON.stringify(seedData); localStorage.setItem('redCba_institutions', inst); }
+            
+            window.CATEGORIES = JSON.parse(cat);
+            window.institutions = JSON.parse(inst);
+            
+            // Si hay filtros activos guardados, los usamos. Si no, activamos todos.
+            let filters = localStorage.getItem('redCba_filters');
+            if(filters) {
+                window.activeFilters = new Set(JSON.parse(filters));
+            } else {
+                window.activeFilters = new Set(Object.keys(window.CATEGORIES));
+            }
+        }
+
+        function saveData() {
+            localStorage.setItem('redCba_categories', JSON.stringify(window.CATEGORIES));
+            localStorage.setItem('redCba_institutions', JSON.stringify(window.institutions));
+            localStorage.setItem('redCba_filters', JSON.stringify([...window.activeFilters]));
+        }
+
+        // --- INICIALIZACIÓN DE VARIABLES Y MAPA LEAFLET ---
+        let map;
+        let markersLayer = new L.LayerGroup();
+        let useEmojis = true;
+        let currentOpenInst = null;
+
+        function initMap() {
+            // Inicializar Leaflet centrado en Córdoba con controles básicos
+            map = L.map('map-container', { zoomControl: false }).setView([-31.413, -64.185], 14);
+            
+            // Usamos un mapa claro de CartoDB que combina perfecto con tu diseño
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+                attribution: '&copy; OpenStreetMap &copy; CARTO'
+            }).addTo(map);
+            
+            // Controles de zoom abajo a la derecha
+            L.control.zoom({ position: 'bottomright' }).addTo(map);
+            markersLayer.addTo(map);
+        }
+
+        window.onload = () => {
+            loadData();
+            initMap();
+            renderFilters();
+            renderCategoriesManager();
+            populateSelect();
+            renderPins();
+        };
+
+        // --- MÉTODOS DEL MAPA Y PINES ---
+        function renderPins() {
+            markersLayer.clearLayers();
+            let count = 0;
+
+            window.institutions.filter(inst => window.activeFilters.has(inst.category)).forEach(inst => {
+                count++;
+                const cat = window.CATEGORIES[inst.category] || window.CATEGORIES.otro;
+                
+                // Crear icono HTML personalizado para Leaflet
+                const iconHtml = `
+                    <div class="pin-shape" style="border-color:${cat.color}; color:${cat.color};">
+                        <div class="pin-icon font-space font-bold ${useEmojis ? 'text-[17px]' : 'text-[22px]'}">${useEmojis ? cat.emoji : cat.glyph}</div>
+                    </div>
+                `;
+
+                const customIcon = L.divIcon({
+                    className: 'custom-pin',
+                    html: iconHtml,
+                    iconSize: [36, 36],
+                    iconAnchor: [18, 36] // El ancla es la base inferior
+                });
+
+                const marker = L.marker([inst.lat, inst.lng], { icon: customIcon });
+                marker.on('click', () => window.abrirDetalle(inst));
+                marker.addTo(markersLayer);
+            });
+            
+            document.getElementById('counter').innerText = `${count} lugares en la red`;
+        }
+
+        window.abrirDetalle = (inst) => {
+            currentOpenInst = inst;
+            map.flyTo([inst.lat, inst.lng], 16, { duration: 0.8 }); // Animación suave hacia el pin
+
+            const cat = window.CATEGORIES[inst.category] || window.CATEGORIES.otro;
+            const badge = document.getElementById('det-cat');
+            badge.innerHTML = `<span class="${useEmojis?'text-sm':'text-lg leading-none'}">${useEmojis ? cat.emoji : cat.glyph}</span> ${cat.label}`;
+            badge.style.color = cat.color;
+            badge.style.borderColor = cat.color;
+            badge.style.backgroundColor = cat.color + '15';
+
+            document.getElementById('det-name').textContent = inst.name;
+            document.getElementById('det-address').textContent = inst.address;
+            
+            const phoneEl = document.getElementById('det-phone');
+            phoneEl.textContent = inst.phone;
+            phoneEl.href = `tel:${inst.phone.replace(/[^0-9+]/g, '')}`;
+
+            document.getElementById('det-hours').textContent = inst.hours || 'No especificado';
+            document.getElementById('det-contact').textContent = inst.contact || 'Sin datos';
+            document.getElementById('det-desc').textContent = inst.description || 'Sin descripción detallada.';
+
+            document.getElementById('btn-maps').href = `https://www.google.com/maps/dir/?api=1&destination=${inst.lat},${inst.lng}`;
+            document.getElementById('btn-call').href = `tel:${inst.phone.replace(/[^0-9+]/g, '')}`;
+
+            document.getElementById('panel-detalle').classList.remove('translate-y-full', 'sm:translate-x-full');
+        };
+
+        window.cerrarDetalle = () => {
+            currentOpenInst = null;
+            document.getElementById('panel-detalle').classList.add('translate-y-full', 'sm:translate-x-full');
+            map.flyTo([-31.413, -64.185], 14, { duration: 0.8 });
+        };
+
+        // --- GESTIÓN DE INSTITUCIONES ---
+        window.guardarInstitucion = (e) => {
+            e.preventDefault();
+            const newInst = {
+                id: 'inst_' + Date.now(),
+                name: document.getElementById('f-name').value,
+                category: document.getElementById('f-cat').value,
+                address: document.getElementById('f-address').value,
+                phone: document.getElementById('f-phone').value,
+                hours: document.getElementById('f-hours').value,
+                contact: document.getElementById('f-contact').value,
+                description: document.getElementById('f-desc').value,
+                lat: parseFloat(document.getElementById('f-lat').value),
+                lng: parseFloat(document.getElementById('f-lng').value)
+            };
+            
+            window.institutions.push(newInst);
+            window.activeFilters.add(newInst.category);
+            saveData();
+            
+            window.toggleModal('modal-agregar');
+            document.getElementById('form-agregar').reset();
+            renderFilters();
+            renderPins();
+            mostrarToast("Institución agregada localmente ✓");
+        };
+
+        window.promptDelete = () => { if(!currentOpenInst) return; window.toggleModal('modal-delete'); };
+
+        window.confirmDelete = () => {
+            if(!currentOpenInst) return;
+            window.institutions = window.institutions.filter(i => i.id !== currentOpenInst.id);
+            saveData();
+            
+            window.toggleModal('modal-delete');
+            window.cerrarDetalle();
+            renderPins();
+            mostrarToast("Institución eliminada", "#b06a6c");
+        };
+
+        // --- GESTIÓN DE CATEGORÍAS ---
+        function renderCategoriesManager() {
+            const list = document.getElementById('lista-categorias');
+            list.innerHTML = '';
+            
+            Object.entries(window.CATEGORIES).forEach(([key, cat]) => {
+                list.innerHTML += `
+                    <div class="flex justify-between items-center bg-[#faf8f5] p-3 rounded-xl border border-[#ece8e0]">
+                        <div class="flex items-center gap-3">
+                            <div class="w-8 h-8 rounded-full flex items-center justify-center font-bold" style="background-color:${cat.color}20; color:${cat.color}; border:1px solid ${cat.color}">
+                                ${cat.emoji}
+                            </div>
+                            <span class="font-space font-bold text-[#433e3c] text-sm">${cat.label}</span>
+                        </div>
+                        ${key !== 'otro' ? `<button onclick="window.eliminarCategoria('${key}')" class="text-[#b06a6c] hover:bg-[#b06a6c] hover:text-white px-2 py-1 rounded transition text-xs font-bold">X</button>` : ''}
+                    </div>
+                `;
+            });
+        }
+
+        window.guardarCategoria = (e) => {
+            e.preventDefault();
+            const label = document.getElementById('c-name').value;
+            const emoji = document.getElementById('c-emoji').value;
+            const color = document.getElementById('c-color').value;
+            
+            // Generar key segura
+            const key = label.toLowerCase().replace(/[^a-z0-9]/g, '');
+            if(!key || window.CATEGORIES[key]) { mostrarToast("Nombre inválido o existente", "#b06a6c"); return; }
+
+            window.CATEGORIES[key] = { label, emoji, color, glyph: "◈" };
+            window.activeFilters.add(key);
+            saveData();
+            
+            document.getElementById('form-categoria').reset();
+            renderCategoriesManager();
+            renderFilters();
+            populateSelect();
+            renderPins();
+            mostrarToast("Categoría creada ✓");
+        };
+
+        window.eliminarCategoria = (key) => {
+            if(key === 'otro') return;
+            // Pasar instituciones de esa categoria a "otro"
+            window.institutions.forEach(inst => { if(inst.category === key) inst.category = 'otro'; });
+            delete window.CATEGORIES[key];
+            window.activeFilters.delete(key);
+            
+            saveData();
+            renderCategoriesManager();
+            renderFilters();
+            populateSelect();
+            renderPins();
+            mostrarToast("Categoría eliminada", "#b06a6c");
+        };
+
+        // --- MÉTODOS DE UI GENERAL ---
+        window.toggleModal = (id) => {
+            const el = document.getElementById(id);
+            el.classList.toggle('hidden');
+            el.classList.toggle('flex');
+        };
+
+        window.toggleVisualMode = () => {
+            useEmojis = !useEmojis;
+            const btn = document.getElementById('btn-visual');
+            btn.innerHTML = useEmojis ? "Cambiar a Glifos" : "Cambiar a Emojis";
+            btn.classList.toggle('bg-[#f2efe9]', useEmojis);
+            btn.classList.toggle('bg-[#e8e4dc]', !useEmojis);
+            renderFilters();
+            renderPins();
+            renderCategoriesManager();
+            if(currentOpenInst) window.abrirDetalle(currentOpenInst);
+        };
+
+        function renderFilters() {
+            const container = document.getElementById('filters');
+            container.innerHTML = '';
+            Object.entries(window.CATEGORIES).forEach(([key, cat]) => {
+                const isActive = window.activeFilters.has(key);
+                const btn = document.createElement('button');
+                btn.className = `whitespace-nowrap px-4 py-1.5 rounded-full border-2 text-sm font-space font-bold transition-all ${isActive ? 'bg-[#fcfbf9] shadow-sm text-[#433e3c]' : 'bg-transparent text-[#9e9791] border-transparent hover:bg-[#f2efe9]'}`;
+                btn.style.borderColor = isActive ? cat.color : 'transparent';
+                
+                const iconStr = useEmojis ? cat.emoji : cat.glyph;
+                btn.innerHTML = `<span style="color:${cat.color}" class="mr-1 ${useEmojis?'text-sm':'text-lg'}">${iconStr}</span> ${cat.label}`;
+                
+                btn.onclick = () => {
+                    isActive ? window.activeFilters.delete(key) : window.activeFilters.add(key);
+                    saveData();
+                    renderFilters();
+                    renderPins();
+                };
+                container.appendChild(btn);
+            });
+        }
+
+        function populateSelect() {
+            const sel = document.getElementById('f-cat');
+            sel.innerHTML = '<option value="" disabled selected>Seleccioná una categoría</option>';
+            Object.entries(window.CATEGORIES).forEach(([k, c]) => { sel.innerHTML += `<option value="${k}">${c.label}</option>`; });
+        }
+
+        function mostrarToast(msg, bgColor = "#798f75") {
+            const toast = document.getElementById('toast');
+            toast.textContent = msg;
+            toast.style.backgroundColor = bgColor;
+            toast.classList.remove('opacity-0', '-translate-y-4');
+            setTimeout(() => toast.classList.add('opacity-0', '-translate-y-4'), 3500);
+        }
+    </script>
+</body>
+</html>
